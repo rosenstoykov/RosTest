@@ -11,8 +11,8 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     
     <!-- jsPDF for PDF Export -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
     
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     
@@ -2658,181 +2658,310 @@
             `;
             container.appendChild(groupDiv);
         }
+// ======================================================================
+       // ==========================================
+// PDF EXPORT WITH PDFMAKE (Cyrillic Support)
+// ==========================================
 
-        function shuffleArray(array) {
-            const newArray = [...array];
-            for (let i = newArray.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-            }
-            return newArray;
+async function exportPDF() {
+    const test = pdfTestData;
+    if (!test) {
+        showToast('Няма избран тест за експорт!', 'error');
+        return;
+    }
+
+    // Get PDF options
+    const totalQuestions = test.questions;
+    const includeCount = parseInt(document.getElementById('pdfQuestionsCount').value) || totalQuestions;
+    const shuffleQ = document.getElementById('shuffleQuestions').checked;
+    const shuffleO = document.getElementById('shuffleOptions').checked;
+    const showCorrect = document.getElementById('showCorrectAnswers').checked;
+    const showPoints = document.getElementById('showPoints').checked;
+    const showScale = document.getElementById('showGradingScale').checked;
+    
+    // Get header info
+    const schoolName = document.getElementById('schoolName')?.value || '';
+    const teacherName = document.getElementById('teacherName')?.value || '';
+    
+    // Select and shuffle questions
+    let selectedQuestions = [...test.questionData];
+    if (shuffleQ) {
+        selectedQuestions = shuffleArray(selectedQuestions);
+    }
+    selectedQuestions = selectedQuestions.slice(0, includeCount);
+    
+    // Build PDF content
+    const content = [];
+    
+    // Header
+    content.push({
+        text: test.title,
+        style: 'header',
+        alignment: 'center',
+        margin: [0, 0, 0, 10]
+    });
+    
+    // School and teacher info
+    if (schoolName) {
+        content.push({
+            text: schoolName,
+            style: 'subheader',
+            alignment: 'center',
+            margin: [0, 0, 0, 5]
+        });
+    }
+    if (teacherName) {
+        content.push({
+            text: `Учител: ${teacherName}`,
+            style: 'subheader',
+            alignment: 'center',
+            margin: [0, 0, 0, 15]
+        });
+    }
+    
+    // Student info fields
+    const studentInfo = [];
+    if (document.getElementById('showNameField')?.checked) {
+        studentInfo.push('Име: _________________________________________________');
+    }
+    if (document.getElementById('showDateField')?.checked) {
+        studentInfo.push('Дата: _______________');
+    }
+    if (document.getElementById('showClassField')?.checked) {
+        studentInfo.push('Клас: _______________');
+    }
+    
+    if (studentInfo.length > 0) {
+        content.push({
+            text: studentInfo.join('    '),
+            style: 'studentInfo',
+            margin: [0, 10, 0, 15]
+        });
+    }
+    
+    // Grading scale
+    if (showScale && test.gradingScale) {
+        const scaleTable = {
+            table: {
+                widths: ['*', '*', '*', '*', '*'],
+                body: [
+                    test.gradingScale.map(g => `Оценка ${g.grade}`),
+                    test.gradingScale.map(g => `${g.min}-${g.max}т.`)
+                ]
+            },
+            layout: {
+                hLineWidth: () => 0.5,
+                vLineWidth: () => 0.5,
+                hLineColor: () => '#000000',
+                vLineColor: () => '#000000',
+                paddingLeft: () => 5,
+                paddingRight: () => 5,
+                paddingTop: () => 3,
+                paddingBottom: () => 3
+            },
+            alignment: 'center',
+            margin: [0, 0, 0, 20],
+            fontSize: 10
+        };
+        content.push(scaleTable);
+    }
+    
+    // Questions
+    selectedQuestions.forEach((q, idx) => {
+        const questionNumber = idx + 1;
+        const pointsText = showPoints ? ` (${q.points || 1}т.)` : '';
+        
+        // Add page break if needed (rough estimate: 5 questions per page)
+        if (idx > 0 && idx % 5 === 0) {
+            content.push({ text: '', pageBreak: 'before' });
         }
-
-        async function exportPDF() {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            
-            const test = pdfTestData;
-            const totalQuestions = test.questions;
-            const includeCount = parseInt(document.getElementById('pdfQuestionsCount').value) || totalQuestions;
-            const shuffleQ = document.getElementById('shuffleQuestions').checked;
-            const shuffleO = document.getElementById('shuffleOptions').checked;
-            const showCorrect = document.getElementById('showCorrectAnswers').checked;
-            const showPoints = document.getElementById('showPoints').checked;
-            const showScale = document.getElementById('showGradingScale').checked;
-            
-            // Get selected questions
-            let selectedQuestions = [...test.questionData];
-            if (shuffleQ) {
-                selectedQuestions = shuffleArray(selectedQuestions);
-            }
-            selectedQuestions = selectedQuestions.slice(0, includeCount);
-            
-            // PDF Settings
-            const font = document.getElementById('pdfFont')?.value || 'times';
-            const fontSize = parseInt(document.getElementById('pdfFontSize')?.value) || 14;
-            const lineHeight = parseFloat(document.getElementById('pdfLineHeight')?.value) || 1.5;
-            
-            doc.setFont(font);
-            
-            let y = 20;
-            
-            // Header
-            doc.setFontSize(18);
-            doc.text(test.title, 105, y, { align: 'center' });
-            y += 10;
-            
-            // School info
-            const schoolName = document.getElementById('schoolName')?.value;
-            const teacherName = document.getElementById('teacherName')?.value;
-            
-            if (schoolName) {
-                doc.setFontSize(12);
-                doc.text(schoolName, 105, y, { align: 'center' });
-                y += 6;
-            }
-            if (teacherName) {
-                doc.text(`Учител: ${teacherName}`, 105, y, { align: 'center' });
-                y += 6;
-            }
-            
-            y += 10;
-            
-            // Student info fields
-            doc.setFontSize(11);
-            if (document.getElementById('showNameField')?.checked) {
-                doc.text('Име: _________________________________________', 20, y);
-                y += 8;
-            }
-            if (document.getElementById('showDateField')?.checked) {
-                doc.text('Дата: _______________', 20, y);
-                y += 8;
-            }
-            if (document.getElementById('showClassField')?.checked) {
-                doc.text('Клас: _______________', 20, y);
-                y += 8;
-            }
-            
-            y += 5;
-            
-            // Grading scale
-            if (showScale && test.gradingScale) {
-                doc.setFontSize(10);
-                doc.text('Скала за оценяване:', 20, y);
-                y += 5;
-                
-                test.gradingScale.forEach(g => {
-                    doc.text(`Оценка ${g.grade}: ${g.min}-${g.max} точки`, 25, y);
-                    y += 4;
+        
+        // Text context for reading comprehension
+        if (q.type === 'text' && q.context) {
+            content.push({
+                text: q.context,
+                style: 'contextText',
+                margin: [0, 10, 0, 10]
+            });
+        }
+        
+        // Question text
+        content.push({
+            text: `${questionNumber}. ${q.text}${pointsText}`,
+            style: 'question',
+            margin: [0, 10, 0, 5]
+        });
+        
+        // Options or answer space
+        if (q.type === 'open') {
+            // Lines for open answer
+            for (let i = 0; i < 3; i++) {
+                content.push({
+                    canvas: [{
+                        type: 'line',
+                        x1: 20,
+                        y1: 0,
+                        x2: 500,
+                        y2: 0,
+                        lineWidth: 0.5
+                    }],
+                    margin: [0, 15, 0, 0]
                 });
-                y += 5;
             }
-            
-            // Questions
-            doc.setFontSize(fontSize);
-            
-            selectedQuestions.forEach((q, idx) => {
-                if (y > 250) {
-                    doc.addPage();
-                    y = 20;
-                }
-                
-                // Question text
-                const questionNum = `${idx + 1}.`;
-                const pointsText = showPoints ? ` (${q.points || 1}т.)` : '';
-                
-                if (q.type === 'text' && q.context) {
-                    // Text context
-                    const splitContext = doc.splitTextToSize(q.context, 170);
-                    doc.setFont(font, 'italic');
-                    doc.text(splitContext, 20, y);
-                    y += splitContext.length * fontSize * 0.5 + 5;
-                    doc.setFont(font, 'normal');
-                    
-                    // Question after context
-                    const splitQuestion = doc.splitTextToSize(`${questionNum} ${q.text}${pointsText}`, 170);
-                    doc.text(splitQuestion, 20, y);
-                    y += splitQuestion.length * fontSize * 0.5 + 5;
-                } else {
-                    const splitQuestion = doc.splitTextToSize(`${questionNum} ${q.text}${pointsText}`, 170);
-                    doc.text(splitQuestion, 20, y);
-                    y += splitQuestion.length * fontSize * 0.5 + 5;
-                }
-                
-                // Options
-                if (q.type !== 'open') {
-                    let options = q.options.map((opt, i) => ({ text: opt, originalIndex: i }));
-                    
-                    if (shuffleO) {
-                        options = shuffleArray(options);
-                    }
-                    
-                    options.forEach((opt, optIdx) => {
-                        const letter = String.fromCharCode(97 + optIdx); // a, b, c, d...
-                        const isCorrect = Array.isArray(q.correct) 
-                            ? q.correct.includes(opt.originalIndex)
-                            : q.correct === opt.originalIndex;
-                        
-                        let optionText = `    ${letter}) ${opt.text}`;
-                        if (showCorrect && isCorrect) {
-                            optionText += ' ✓';
-                        }
-                        
-                        const splitOption = doc.splitTextToSize(optionText, 160);
-                        doc.text(splitOption, 20, y);
-                        y += splitOption.length * fontSize * 0.4 + 2;
-                    });
-                } else {
-                    // Open answer lines
-                    for (let i = 0; i < 3; i++) {
-                        doc.line(20, y, 190, y);
-                        y += 8;
-                    }
-                }
-                
-                y += 5;
+            content.push({ text: '', margin: [0, 5, 0, 10] });
+        } else if (q.type === 'truefalse') {
+            // True/False options
+            content.push({
+                columns: [
+                    { text: '    ☐ Вярно', width: 'auto' },
+                    { text: '    ☐ Невярно', width: 'auto' }
+                ],
+                margin: [0, 5, 0, 10]
             });
             
-            // Footer
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(10);
-                doc.text(`Страница ${i} от ${pageCount}`, 105, 290, { align: 'center' });
+            if (showCorrect) {
+                const correctText = q.correct === 0 ? 'Вярно' : 'Невярно';
+                content.push({
+                    text: `✓ Верен отговор: ${correctText}`,
+                    style: 'correctAnswer',
+                    margin: [20, 0, 0, 10]
+                });
+            }
+        } else {
+            // Multiple/Single choice options
+            let options = q.options.map((opt, i) => ({ 
+                text: opt, 
+                originalIndex: i,
+                letter: String.fromCharCode(97 + i) // a, b, c, d...
+            }));
+            
+            if (shuffleO) {
+                options = shuffleArray(options);
+                // Reassign letters after shuffle
+                options.forEach((opt, i) => {
+                    opt.letter = String.fromCharCode(97 + i);
+                });
             }
             
-            doc.save(`${test.title.replace(/\s+/g, '_')}.pdf`);
-            showToast('PDF е изтеглен успешно! 📄');
+            options.forEach((opt) => {
+                const isCorrect = Array.isArray(q.correct) 
+                    ? q.correct.includes(opt.originalIndex)
+                    : q.correct === opt.originalIndex;
+                
+                let optionText = `    ${opt.letter}) ${opt.text}`;
+                
+                content.push({
+                    text: optionText,
+                    style: 'option',
+                    margin: [0, 3, 0, 3]
+                });
+            });
             
-            // Update stats
-            const pdfCount = parseInt(localStorage.getItem('rostest_pdfs') || '0') + 1;
-            localStorage.setItem('rostest_pdfs', pdfCount);
-            document.getElementById('totalPDFs').textContent = pdfCount;
+            if (showCorrect) {
+                let correctLetters;
+                if (Array.isArray(q.correct)) {
+                    correctLetters = q.correct.map(c => {
+                        const opt = options.find(o => o.originalIndex === c);
+                        return opt ? opt.letter : String.fromCharCode(97 + c);
+                    }).join(', ');
+                } else {
+                    const opt = options.find(o => o.originalIndex === q.correct);
+                    correctLetters = opt ? opt.letter : String.fromCharCode(97 + q.correct);
+                }
+                
+                content.push({
+                    text: `✓ Верен отговор: ${correctLetters}`,
+                    style: 'correctAnswer',
+                    margin: [20, 5, 0, 15]
+                });
+            } else {
+                content.push({ text: '', margin: [0, 5, 0, 10] });
+            }
         }
+    });
+    
+    // Footer with page numbers
+    const footer = function(currentPage, pageCount) {
+        return {
+            text: `Страница ${currentPage} от ${pageCount}`,
+            alignment: 'center',
+            fontSize: 10,
+            margin: [0, 10, 0, 0]
+        };
+    };
+    
+    // PDF definition
+    const docDefinition = {
+        content: content,
+        footer: footer,
+        styles: {
+            header: {
+                fontSize: 18,
+                bold: true,
+                color: '#000000'
+            },
+            subheader: {
+                fontSize: 12,
+                color: '#333333'
+            },
+            studentInfo: {
+                fontSize: 11,
+                color: '#000000'
+            },
+            contextText: {
+                fontSize: 12,
+                italics: true,
+                color: '#333333',
+                alignment: 'justify'
+            },
+            question: {
+                fontSize: 12,
+                bold: true,
+                color: '#000000'
+            },
+            option: {
+                fontSize: 11,
+                color: '#000000'
+            },
+            correctAnswer: {
+                fontSize: 10,
+                color: '#10b981',
+                italics: true
+            }
+        },
+        defaultStyle: {
+            font: 'Roboto',
+            fontSize: 12,
+            color: '#000000'
+        },
+        pageSize: 'A4',
+        pageMargins: [40, 40, 40, 60]
+    };
+    
+    // Generate and download PDF
+    try {
+        pdfMake.createPdf(docDefinition).download(`${test.title.replace(/\s+/g, '_')}.pdf`);
+        showToast('PDF е изтеглен успешно! 📄');
+        
+        // Update stats
+        const pdfCount = parseInt(localStorage.getItem('rostest_pdfs') || '0') + 1;
+        localStorage.setItem('rostest_pdfs', pdfCount);
+        document.getElementById('totalPDFs').textContent = pdfCount;
+        
+    } catch (error) {
+        console.error('PDF generation error:', error);
+        showToast('Грешка при генериране на PDF!', 'error');
+    }
+}
 
-        function previewPDF() {
-            showToast('Функцията за преглед е в разработка. Моля, изтеглете PDF-а.', 'warning');
-        }
+function shuffleArray(array) {
+    const newArray = [...array];
+    for (let i = newArray.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+    }
+    return newArray;
+}
 
         // ==========================================
         // RENDER FUNCTIONS
